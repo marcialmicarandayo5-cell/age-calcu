@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Age & Date Calculator</title>
+<style>
+  :root {
+    --bg: #f3f5f7; --card: #ffffff; --ink: #14202b; --muted: #5d6b78;
+    --line: #d9e0e6; --accent: #0b5cad; --accent-ink: #ffffff; --soft: #e8f0f9;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10161c; --card: #18212a; --ink: #e8eef3; --muted: #9aa8b5;
+      --line: #2b3844; --accent: #6cb0f2; --accent-ink: #0c1218; --soft: #1d2b3a;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 560px; margin: 0 auto; }
+  h1 { font: 600 1.6rem/1.2 Georgia, "Times New Roman", serif; margin: 8px 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tabs button {
+    flex: 1; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--card); color: var(--ink); font: inherit; cursor: pointer;
+  }
+  .tabs button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  section[hidden] { display: none; }
+  .fields { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 460px) { .fields { grid-template-columns: 1fr; } }
+  label { display: block; font-size: .9rem; color: var(--muted); margin-bottom: 4px; }
+  input[type="date"] {
+    width: 100%; padding: 10px; font: inherit; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  }
+  .result { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
+  .big { font: 600 3.4rem/1 Georgia, "Times New Roman", serif; color: var(--accent); }
+  .big small { font-size: 1.1rem; color: var(--muted); font-weight: 400; margin-left: 6px; }
+  .line { font-size: 1.1rem; margin: 8px 0 16px; }
+  .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 0; }
+  .stats div { background: var(--soft); border-radius: 8px; padding: 10px 12px; }
+  .stats dt { font-size: .8rem; color: var(--muted); }
+  .stats dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .note { margin-top: 14px; }
+  .error { color: #b3261e; }
+  @media (prefers-color-scheme: dark) { .error { color: #f2b8b5; } }
+  .hint { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Age & Date Calculator</h1>
+  <p class="sub">Find an exact age, or the time between any two dates.</p>
+
+  <div class="tabs" role="group" aria-label="Choose a calculator">
+    <button id="tab-age" aria-pressed="true">Age</button>
+    <button id="tab-diff" aria-pressed="false">Between two dates</button>
+  </div>
+
+  <section id="panel-age">
+    <div class="fields">
+      <div><label for="birth">Date of birth</label><input type="date" id="birth"></div>
+      <div><label for="asof">Age on this date</label><input type="date" id="asof"></div>
+    </div>
+    <div class="result" id="out-age" aria-live="polite"><span class="hint">Enter a date of birth to see the age.</span></div>
+  </section>
+
+  <section id="panel-diff" hidden>
+    <div class="fields">
+      <div><label for="from">Start date</label><input type="date" id="from"></div>
+      <div><label for="to">End date</label><input type="date" id="to"></div>
+    </div>
+    <div class="result" id="out-diff" aria-live="polite"><span class="hint">Pick two dates to see the difference.</span></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const pl = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const num = n => n.toLocaleString();
+
+// Parse "YYYY-MM-DD" as a local date (avoids timezone shifts).
+const parse = v => { const [y, m, d] = v.split('-').map(Number); return new Date(y, m - 1, d); };
+const toStr = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const utc = d => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+const daysBetween = (a, b) => Math.round((utc(b) - utc(a)) / 864e5);
+const fmt = d => d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+// Years, months, days from a to b (a <= b).
+function ymd(a, b) {
+  let y = b.getFullYear() - a.getFullYear();
+  let m = b.getMonth() - a.getMonth();
+  let d = b.getDate() - a.getDate();
+  if (d < 0) { m--; d += new Date(b.getFullYear(), b.getMonth(), 0).getDate(); } // days in previous month
+  if (m < 0) { y--; m += 12; }
+  return { y, m, d };
+}
+
+function weekdaysBetween(a, b) {
+  let count = 0;
+  for (let t = new Date(a); t <= b; t.setDate(t.getDate() + 1)) {
+    const day = t.getDay();
+    if (day !== 0 && day !== 6) count++;
+  }
+  return count;
+}
+
+const stat = (label, value) => `<div><dt>${label}</dt><dd>${value}</dd></div>`;
+
+function calcAge() {
+  const out = $('out-age');
+  if (!$('birth').value || !$('asof').value) {
+    out.innerHTML = '<span class="hint">Enter a date of birth to see the age.</span>';
+    return;
+  }
+  const birth = parse($('birth').value), asOf = parse($('asof').value);
+  if (birth > asOf) {
+    out.innerHTML = '<span class="error">The date of birth must be before the “age on” date.</span>';
+    return;
+  }
+  const { y, m, d } = ymd(birth, asOf);
+  const totalDays = daysBetween(birth, asOf);
+
+  // Next birthday (Feb 29 birthdays fall on Mar 1 in non-leap years).
+  let next = new Date(asOf.getFullYear(), birth.getMonth(), birth.getDate());
+  if (next < asOf) next = new Date(asOf.getFullYear() + 1, birth.getMonth(), birth.getDate());
+  const left = daysBetween(asOf, next);
+  const birthdayText = left === 0
+    ? 'Happy birthday! It’s today 🎉'
+    : `${fmt(next)} (in ${pl(left, 'day')})`;
+
+  out.innerHTML = `
+    <div class="big">${y}<small>${y === 1 ? 'year' : 'years'} old</small></div>
+    <p class="line">${pl(y, 'year')}, ${pl(m, 'month')}, ${pl(d, 'day')}</p>
+    <dl class="stats">
+      ${stat('Total months', num(y * 12 + m))}
+      ${stat('Total weeks', num(Math.floor(totalDays / 7)))}
+      ${stat('Total days', num(totalDays))}
+      ${stat('Total hours', num(totalDays * 24))}
+    </dl>
+    <p class="note"><strong>Born on a</strong> ${birth.toLocaleDateString(undefined, { weekday: 'long' })}.<br>
+    <strong>Next birthday:</strong> ${birthdayText}</p>`;
+}
+
+function calcDiff() {
+  const out = $('out-diff');
+  if (!$('from').value || !$('to').value) {
+    out.innerHTML = '<span class="hint">Pick two dates to see the difference.</span>';
+    return;
+  }
+  let a = parse($('from').value), b = parse($('to').value);
+  let swapped = false;
+  if (a > b) { [a, b] = [b, a]; swapped = true; }
+  const { y, m, d } = ymd(a, b);
+  const days = daysBetween(a, b);
+
+  out.innerHTML = `
+    <div class="big">${num(days)}<small>${days === 1 ? 'day' : 'days'}</small></div>
+    <p class="line">${pl(y, 'year')}, ${pl(m, 'month')}, ${pl(d, 'day')}</p>
+    <dl class="stats">
+      ${stat('Weeks', `${num(Math.floor(days / 7))} wk ${days % 7} d`)}
+      ${stat('Weekdays (Mon–Fri)', num(weekdaysBetween(a, b)))}
+      ${stat('Hours', num(days * 24))}
+      ${stat('Minutes', num(days * 1440))}
+    </dl>
+    ${swapped ? '<p class="note hint">The dates were swapped so the start comes first.</p>' : ''}`;
+}
+
+function show(tab) {
+  const age = tab === 'age';
+  $('panel-age').hidden = !age;
+  $('panel-diff').hidden = age;
+  $('tab-age').setAttribute('aria-pressed', age);
+  $('tab-diff').setAttribute('aria-pressed', !age);
+}
+
+$('tab-age').addEventListener('click', () => show('age'));
+$('tab-diff').addEventListener('click', () => show('diff'));
+['birth', 'asof'].forEach(id => $(id).addEventListener('input', calcAge));
+['from', 'to'].forEach(id => $(id).addEventListener('input', calcDiff));
+
+$('asof').value = toStr(new Date());
+$('from').value = toStr(new Date());
+</script>
+</body>
+</html>
